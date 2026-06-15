@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Kognitif VR Sayı Oyunu - Kesin Çakışma Önleme</title>
+    <title>Kognitif VR Sayı Oyunu - Gelişmiş Geri Bildirim</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body, html {
@@ -247,15 +247,15 @@
             uiTextTexture.needsUpdate = true;
         }
 
-        // --- DÜZELTME: KESİN ÇAKIŞMA ÖNLEYİCİ GEOMETRİK HAVUZ ---
+        // --- GÜNCELLEME: ÇAP 0.75 KATINA DÜŞÜRÜLDÜ VE MESAFE YARIM DAİRE OLARAK AYARLANDI ---
         function generateDynamicTargets() {
             targetNumbers.forEach(mesh => scene.remove(mesh));
             targetNumbers = [];
             currentTargetNumber = 1;
 
             const radius = 4;
-            // Çapı 1.4 olan bir dairenin yanına 1 dairelik net boşluk bırakması için merkezler arası en az 2.9m olmalı.
-            const minDistanceBetweenObjects = 2.9; 
+            // Çap: 1.05. Yarım daire boşlukla beraber aralarındaki min mesafe: Çap * 1.5 = ~1.6 metre
+            const minDistanceBetweenObjects = 1.6; 
 
             for (let num = 1; num <= maxNumberInLevel; num++) {
                 const canvas = document.createElement('canvas');
@@ -269,7 +269,8 @@
                 ctx.fillText(num.toString(), 128, 128);
 
                 const texture = new THREE.CanvasTexture(canvas);
-                const geometry = new THREE.PlaneGeometry(1.4, 1.4); 
+                // Boyut 1.4'ten 1.05'e indirildi (Tam olarak 0.75 katı)
+                const geometry = new THREE.PlaneGeometry(1.05, 1.05); 
                 const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
                 const mesh = new THREE.Mesh(geometry, material);
 
@@ -277,11 +278,10 @@
                 let posX, posY, posZ;
                 let attempts = 0;
 
-                // Tıkanmayı önlemek için koordinat aralığı (havuz) genişletildi
-                while (!validPosition && attempts < 500) {
+                while (!validPosition && attempts < 200) {
                     attempts++;
-                    const angleX = (Math.random() * 2.2 - 1.1); // Yatay kavis açısı genişletildi
-                    const randomY = 0.2 + (Math.random() * 2.2); // Dikey tarama alanı genişletildi
+                    const angleX = (Math.random() * 1.4 - 0.7); 
+                    const randomY = 0.6 + (Math.random() * 1.6); 
 
                     posX = Math.sin(angleX) * radius;
                     posY = randomY;
@@ -317,15 +317,15 @@
 
         function relocateTarget(mesh) {
             const radius = 4;
-            const minDistanceBetweenObjects = 2.9; 
+            const minDistanceBetweenObjects = 1.6; 
             let validPosition = false;
             let posX, posY, posZ;
             let attempts = 0;
 
-            while (!validPosition && attempts < 500) {
+            while (!validPosition && attempts < 200) {
                 attempts++;
-                const angleX = (Math.random() * 2.2 - 1.1);
-                const randomY = 0.2 + (Math.random() * 2.2);
+                const angleX = (Math.random() * 1.4 - 0.7);
+                const randomY = 0.6 + (Math.random() * 1.6);
 
                 posX = Math.sin(angleX) * radius;
                 posY = randomY;
