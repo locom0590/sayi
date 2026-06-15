@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Kognitif VR Sayı Oyunu - Gelişmiş Geri Bildirim</title>
+    <title>Kognitif VR Sayı Oyunu - Kesin Çakışma Önleme</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body, html {
@@ -196,7 +196,6 @@
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
             scene.add(ambientLight);
 
-            // --- DÜZELTME: İMLEÇ SAHNEYE EKLENDİ VE EN ÖNE ALINDI ---
             const reticleGeo = new THREE.RingGeometry(0.05, 0.09, 32); 
             const reticleMat = new THREE.MeshBasicMaterial({ 
                 color: 0xffffff, 
@@ -206,8 +205,8 @@
                 transparent: true
             });
             reticleMesh = new THREE.Mesh(reticleGeo, reticleMat);
-            reticleMesh.renderOrder = 99999; // Çok yüksek render önceliği
-            scene.add(reticleMesh); // Doğrudan sahneye eklendi, artık arkada kalmayacak
+            reticleMesh.renderOrder = 99999; 
+            scene.add(reticleMesh); 
 
             createUIOverlay();
             generateDynamicTargets(); 
@@ -248,14 +247,15 @@
             uiTextTexture.needsUpdate = true;
         }
 
-        // --- DÜZELTME: ÇAKIŞMA MESAFESİ GENİŞLETİLDİ (1.6 -> 2.8) ---
+        // --- DÜZELTME: KESİN ÇAKIŞMA ÖNLEYİCİ GEOMETRİK HAVUZ ---
         function generateDynamicTargets() {
             targetNumbers.forEach(mesh => scene.remove(mesh));
             targetNumbers = [];
             currentTargetNumber = 1;
 
             const radius = 4;
-            const minDistanceBetweenObjects = 2.8; // İki katı büyüklükteki daireler için çakışmayı önleyen güvenli aralık
+            // Çapı 1.4 olan bir dairenin yanına 1 dairelik net boşluk bırakması için merkezler arası en az 2.9m olmalı.
+            const minDistanceBetweenObjects = 2.9; 
 
             for (let num = 1; num <= maxNumberInLevel; num++) {
                 const canvas = document.createElement('canvas');
@@ -277,10 +277,11 @@
                 let posX, posY, posZ;
                 let attempts = 0;
 
-                while (!validPosition && attempts < 200) {
+                // Tıkanmayı önlemek için koordinat aralığı (havuz) genişletildi
+                while (!validPosition && attempts < 500) {
                     attempts++;
-                    const angleX = (Math.random() * 1.4 - 0.7); // Doğal bir dağılım için havuz genişletildi
-                    const randomY = 0.6 + (Math.random() * 1.6); 
+                    const angleX = (Math.random() * 2.2 - 1.1); // Yatay kavis açısı genişletildi
+                    const randomY = 0.2 + (Math.random() * 2.2); // Dikey tarama alanı genişletildi
 
                     posX = Math.sin(angleX) * radius;
                     posY = randomY;
@@ -316,15 +317,15 @@
 
         function relocateTarget(mesh) {
             const radius = 4;
-            const minDistanceBetweenObjects = 2.8; 
+            const minDistanceBetweenObjects = 2.9; 
             let validPosition = false;
             let posX, posY, posZ;
             let attempts = 0;
 
-            while (!validPosition && attempts < 200) {
+            while (!validPosition && attempts < 500) {
                 attempts++;
-                const angleX = (Math.random() * 1.4 - 0.7);
-                const randomY = 0.6 + (Math.random() * 1.6);
+                const angleX = (Math.random() * 2.2 - 1.1);
+                const randomY = 0.2 + (Math.random() * 2.2);
 
                 posX = Math.sin(angleX) * radius;
                 posY = randomY;
@@ -452,7 +453,6 @@
             currentQuaternion.slerp(calibratedTarget, SMOOTH_FACTOR);
             camera.quaternion.copy(currentQuaternion);
 
-            // --- DÜZELTME: İMLEÇ POZİSYONU EN ÖNDE TUTULACAK ŞEKİLDE GÜNCELLENİYOR ---
             const targetPosition = new THREE.Vector3(0, 0, -1.4);
             targetPosition.applyQuaternion(camera.quaternion);
             targetPosition.add(camera.position);
