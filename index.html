@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Kognitif VR Sayı Oyunu - Görüş Alanı Sabitleme</title>
+    <title>Kognitif VR Sayı Oyunu - Gelişmiş Seviye Sistemi</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body, html {
@@ -64,16 +64,19 @@
         let centerPointer = new THREE.Vector2(0, 0); 
         let reticleMesh; 
         
+        // --- SEVİYE VE DÖNGÜ DEĞİŞKENLERİ ---
         let targetNumbers = []; 
         let currentTargetNumber = 1; 
+        let maxNumberInLevel = 4; // Başlangıçta 4 sayı (1,2,3,4)
+        let isMovementMode = false; // İlk turda hareket kapalı
+        
         let gazeTimer = 0; 
-        const GAZE_TIME_REQUIRED = 1.5; 
+        const GAZE_TIME_REQUIRED = 1.0; // İstediğin gibi 1 saniyeye düşürüldü
         let intersectedObject = null; 
         let clock = new THREE.Clock(); 
 
         let uiTextTexture, uiTextMesh;
 
-        // Jiroskop Veri Dinleyicisi
         function onDeviceOrientation(event) {
             if (event.alpha === null) return;
             const alpha = THREE.MathUtils.degToRad(event.alpha);
@@ -82,7 +85,6 @@
             rawSensorQuaternion.setFromEuler(new THREE.Euler(beta, alpha, -gamma, 'YXZ'));
         }
 
-        // --- TARAYICI UYUMLU BAĞLANTI BAŞLATICI ---
         document.getElementById('btn-start').addEventListener('click', function() {
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
@@ -95,7 +97,7 @@
                         }
                     })
                     .catch(err => {
-                        console.log("Sensör kilitli (Muhtemelen HTTP yüzünden). Fare moduna geçiliyor.");
+                        console.log("Sensör kilitli. Fare moduna geçiliyor.");
                         setupFallbackControls();
                         setupGame();
                     });
@@ -117,7 +119,6 @@
                 mouseY = (e.clientY / window.innerHeight) * Math.PI - Math.PI / 2;
                 rawSensorQuaternion.setFromEuler(new THREE.Euler(-mouseY, mouseX, 0, 'YXZ'));
             });
-            
             window.addEventListener('touchmove', (e) => {
                 if(e.touches.length > 0) {
                     let t = e.touches[0];
@@ -168,14 +169,16 @@
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
             scene.add(ambientLight);
 
-            const reticleGeo = new THREE.RingGeometry(0.015, 0.025, 32);
+            // --- GÜNCELLEME: DAHA BÜYÜK İMLEÇ (RETICLE) ---
+            // Yarıçap değerlerini büyüterek (0.015->0.025 ve 0.025->0.045) hastanın odağı kaçırmamasını sağladık.
+            const reticleGeo = new THREE.RingGeometry(0.025, 0.045, 32);
             const reticleMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, depthTest: false });
             reticleMesh = new THREE.Mesh(reticleGeo, reticleMat);
             reticleMesh.position.set(0, 0, -1.5); 
             camera.add(reticleMesh);
 
             createUIOverlay();
-            createNumberTargets();
+            generateDynamicTargets(); // İlk tura ait sayıları üret
 
             window.addEventListener('resize', onWindowResize, false);
         }
@@ -185,13 +188,18 @@
             canvas.width = 512; canvas.height = 128;
             uiTextTexture = new THREE.CanvasTexture(canvas);
             
-            updateUIText("HEDEF SAYI: 1");
+            updateUIStatus();
 
             const geometry = new THREE.PlaneGeometry(0.6, 0.15);
             const material = new THREE.MeshBasicMaterial({ map: uiTextTexture, transparent: true, depthTest: false });
             uiTextMesh = new THREE.Mesh(geometry, material);
             uiTextMesh.position.set(0, 0.25, -1.5); 
             camera.add(uiTextMesh);
+        }
+
+        function updateUIStatus() {
+            let modeText = isMovementMode ? " [HAREKETLİ]" : "";
+            updateUIText("HEDEF: " + currentTargetNumber + " / " + maxNumberInLevel + modeText);
         }
 
         function updateUIText(text) {
@@ -201,46 +209,57 @@
             if(ctx.roundRect) ctx.roundRect(0, 0, 512, 128, 20); else ctx.fillRect(0, 0, 512, 128);
             ctx.fill();
             ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 4; ctx.stroke();
-            ctx.fillStyle = '#ffffff'; ctx.font = 'bold 36px sans-serif';
+            ctx.fillStyle = '#ffffff'; ctx.font = 'bold 32px sans-serif';
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             ctx.fillText(text, 256, 64);
             uiTextTexture.needsUpdate = true;
         }
 
-        function createNumberTargets() {
-            const numbers = [1, 2, 3, 4];
-            
-            // --- GÖZ ÖNÜNE SABİTLEME GÜNCELLEMESİ ---
-            // Açıları -0.6 radyandan -0.3 radyana (Yaklaşık -17 ila +17 derece arasına) daralttık.
-            // Böylece tüm sayılar tam olarak kullanıcının görüş alanında (gözünün önünde) toplanacak.
-            const angles = [-0.3, -0.1, 0.1, 0.3]; 
+        // --- GÜNCELLEME: RASTGELE KONUMLANDIRMA VE DİNAMİK SAYI ÜRETİMİ ---
+        function generateDynamicTargets() {
+            // Eski tura ait objeleri sahneden temizle
+            targetNumbers.forEach(mesh => scene.remove(mesh));
+            targetNumbers = [];
+            currentTargetNumber = 1;
 
-            numbers.forEach((num, index) => {
+            for (let num = 1; num <= maxNumberInLevel; num++) {
                 const canvas = document.createElement('canvas');
                 canvas.width = 256; canvas.height = 256;
                 const ctx = canvas.getContext('2d');
                 
                 ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.arc(128, 128, 110, 0, Math.PI*2); ctx.fill();
-                ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 8; ctx.stroke();
+                ctx.strokeStyle = isMovementMode ? '#eab308' : '#3b82f6'; ctx.lineWidth = 8; ctx.stroke(); // Mod rengi
                 ctx.fillStyle = '#ffffff'; ctx.font = 'bold 110px sans-serif';
                 ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
                 ctx.fillText(num.toString(), 128, 128);
 
                 const texture = new THREE.CanvasTexture(canvas);
-                const geometry = new THREE.PlaneGeometry(0.8, 0.8);
+                const geometry = new THREE.PlaneGeometry(0.7, 0.7);
                 const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
                 const mesh = new THREE.Mesh(geometry, material);
 
+                // Görüş alanı içinde (-30 derece ile +30 derece arası yatay, hafif dikey sapma) rastgele dizilim
                 const radius = 4;
-                const angle = angles[index];
-                mesh.position.x = Math.sin(angle) * radius;
-                mesh.position.y = 1.6;
-                mesh.position.z = -Math.cos(angle) * radius;
+                const angleX = (Math.random() * 1.0 - 0.5); // Yatay kavis dağılımı
+                const randomY = 1.0 + (Math.random() * 1.2); // Dikey yükseklik dağılımı (Göz hizası çevreleri)
 
-                mesh.userData = { number: num }; 
+                mesh.position.x = Math.sin(angleX) * radius;
+                mesh.position.y = randomY;
+                mesh.position.z = -Math.cos(angleX) * radius;
+
+                // Hareket modu için her objeye özel benzersiz hız ve faz ekliyoruz
+                mesh.userData = { 
+                    number: num,
+                    seedX: Math.random() * 10,
+                    seedY: Math.random() * 10,
+                    baseX: mesh.position.x,
+                    baseY: mesh.position.y
+                }; 
+
                 scene.add(mesh);
                 targetNumbers.push(mesh);
-            });
+            }
+            updateUIStatus();
         }
 
         function checkGaze(deltaTime) {
@@ -257,7 +276,7 @@
                 }
 
                 gazeTimer += deltaTime;
-                let scaleProgress = 1 + (gazeTimer / GAZE_TIME_REQUIRED) * 0.5;
+                let scaleProgress = 1 + (gazeTimer / GAZE_TIME_REQUIRED) * 0.4;
                 reticleMesh.scale.set(scaleProgress, scaleProgress, 1);
 
                 if (gazeTimer >= GAZE_TIME_REQUIRED) {
@@ -278,31 +297,41 @@
             const selectedNumber = obj.userData.number;
             if (selectedNumber === currentTargetNumber) {
                 reticleMesh.material.color.setHex(0x22c55e); 
-                obj.position.y += 20; 
+                obj.position.y += 20; // Seçileni yukarı uçur
                 currentTargetNumber++;
 
-                if (currentTargetNumber > 4) {
-                    updateUIText("TEBRİKLER! BİTTİ");
-                    setTimeout(() => { resetGame(); }, 3000);
+                if (currentTargetNumber > maxNumberInLevel) {
+                    // Seviye tamamlandığında tetiklenecek kural döngüsü
+                    progressToNextLevel();
                 } else {
-                    updateUIText("HEDEF SAYI: " + currentTargetNumber);
+                    updateUIStatus();
                 }
             } else {
                 reticleMesh.material.color.setHex(0xef4444); 
             }
         }
 
-        function resetGame() {
-            currentTargetNumber = 1;
-            updateUIText("HEDEF SAYI: 1");
-            targetNumbers.forEach((mesh, index) => {
-                mesh.position.y = 1.6;
-            });
+        // --- GÜNCELLEME: KADEMELİ ZORLUK SEVİYE SİSTEMİ ---
+        function progressToNextLevel() {
+            updateUIText("TEBRİKLER! YENİ TUR");
+            
+            setTimeout(() => {
+                if (maxNumberInLevel < 10) {
+                    // Sayıyı 1 arttırarak bir sonraki tura geç (Örn: 4 -> 5 -> 6...)
+                    maxNumberInLevel++;
+                } else {
+                    // 10 başarıyla bittiğinde başa dön ama bu sefer HAREKET MODUNU aç/kapat
+                    maxNumberInLevel = 4;
+                    isMovementMode = !isMovementMode; // false ise true yapar, true ise false
+                }
+                generateDynamicTargets();
+            }, 1500);
         }
 
         function animate() {
             requestAnimationFrame(animate);
             const deltaTime = clock.getDelta();
+            const time = clock.getElapsedTime();
 
             const orient = window.orientation ? THREE.MathUtils.degToRad(window.orientation) : 0;
             
@@ -315,6 +344,12 @@
             camera.quaternion.copy(currentQuaternion);
 
             targetNumbers.forEach(mesh => {
+                // --- GÜNCELLEME: YUMUŞAK HAREKET MODU ---
+                if (isMovementMode && mesh.position.y < 10) { // Seçilip yukarı uçmamışsa hareket etsin
+                    // Matematiksel sinisüdal dalgalanma ile yumuşak yüzen objeler yaratıyoruz
+                    mesh.position.x = mesh.userData.baseX + Math.sin(time + mesh.userData.seedX) * 0.25;
+                    mesh.position.y = mesh.userData.baseY + Math.cos(time * 0.8 + mesh.userData.seedY) * 0.20;
+                }
                 mesh.lookAt(camera.position.x, mesh.position.y, camera.position.z);
             });
 
