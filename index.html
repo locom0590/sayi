@@ -84,24 +84,59 @@
 
         // --- TARAYICI UYUMLU BAĞLANTI BAŞLATICI ---
         document.getElementById('btn-start').addEventListener('click', function() {
-            // İzin isteme mekanizması (iOS ve modern Android korumaları için)
+            // 1. Durum: iOS ve requestPermission isteyen modern cihazlar
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
                     .then(permissionState => {
                         if (permissionState === 'granted') {
+                            window.addEventListener('deviceorientation', onDeviceOrientation, false);
                             setupGame();
                         } else {
-                            alert("Jiroskop izni verilmedi. Ayarlardan tarayıcı izinlerini kontrol edin.");
+                            alert("Jiroskop izni reddedildi. Ayarlardan tarayıcı izinlerini kontrol edin.");
                         }
                     })
                     .catch(err => {
-                        alert("Sensör hatası: " + err.message);
+                        // BURASI: HTTPS olmadığında buraya düşer. 
+                        // Testi engellememek için jiroskop yerine Mouse (Fare) kontrolüyle oyunu başlatıyoruz!
+                        console.log("Sensör kilitli (Muhtemelen HTTP yüzünden). Fare moduna geçiliyor.");
+                        setupFallbackControls();
+                        setupGame();
                     });
             } else {
-                // Standart Android veya PC tarayıcı testleri için doğrudan geçiş
+                // 2. Durum: Standart Android veya PC (Doğrudan başlatmayı dene)
+                window.addEventListener('deviceorientation', onDeviceOrientation, false);
+                // Eğer 2 saniye içinde jiroskoptan veri gelmezse fare modunu aktif et
+                setTimeout(() => {
+                    if (rawSensorQuaternion.lengthSq() === 1) { // Eğer kuaterniyon hiç değişmediyse
+                        setupFallbackControls();
+                    }
+                }, 1000);
                 setupGame();
             }
         });
+
+        // Bilgisayarda veya HTTP yüzünden sensörü kilitlenen telefonlarda test edebilmek için yedek kontrolcü
+        function setupFallbackControls() {
+            let mouseX = 0, mouseY = 0;
+            window.addEventListener('mousemove', (e) => {
+                // Fare hareketini radyana çevirip sanal bir dönme açısı yaratıyoruz
+                mouseX = (e.clientX / window.innerWidth) * Math.PI * 2 - Math.PI;
+                mouseY = (e.clientY / window.innerHeight) * Math.PI - Math.PI / 2;
+                
+                // Ham sensör verisiymiş gibi simüle et
+                rawSensorQuaternion.setFromEuler(new THREE.Euler(-mouseY, mouseX, 0, 'YXZ'));
+            });
+            
+            // Mobil tarayıcıda HTTP ile açtıysan parmak sürükleyerek bakış yönünü simüle et
+            window.addEventListener('touchmove', (e) => {
+                if(e.touches.length > 0) {
+                    let t = e.touches[0];
+                    mouseX = (t.clientX / window.innerWidth) * Math.PI * 2 - Math.PI;
+                    mouseY = (t.clientY / window.innerHeight) * Math.PI - Math.PI / 2;
+                    rawSensorQuaternion.setFromEuler(new THREE.Euler(-mouseY, mouseX, 0, 'YXZ'));
+                }
+            }, { passive: true });
+        }
 
         function setupGame() {
             // Sensör dinlemeyi başlat
@@ -116,7 +151,7 @@
 
             // UI Değişimleri
             document.getElementById('vr-overlay').style.display = 'none';
-            document.getElementById('btn-calibrate').style.style.display = 'block';
+            document.getElementById('btn-calibrate').style.display = 'block';
 
             // Oyunu kur ve döngüyü tetikle
             init();
@@ -254,7 +289,7 @@
             const selectedNumber = obj.userData.number;
             if (selectedNumber === currentTargetNumber) {
                 reticleMesh.material.color.setHex(0x22c55e); 
-                obj.position.y += 20; // Doğru bilinen sayıyı yukarı fırlatıp gizle
+                obj.position.y += 20; 
                 currentTargetNumber++;
 
                 if (currentTargetNumber > 4) {
