@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Kognitif VR Sayı Oyunu - Aşama 2 & 3</title>
+    <title>Kognitif VR Sayı Oyunu - Fix</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body, html {
@@ -11,24 +11,26 @@
             overflow: hidden; background-color: #000; font-family: sans-serif;
             touch-action: none; user-select: none; -webkit-user-select: none;
         }
-        #canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+        #canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
         
         #vr-overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(10, 10, 15, 0.95); z-index: 1000;
+            background: #0f172a; z-index: 1000;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
             color: white; text-align: center; padding: 20px;
         }
         .vr-start-btn {
-            background: #2563eb; color: white; border: none; padding: 16px 32px;
-            font-size: 18px; font-weight: bold; border-radius: 30px; cursor: pointer;
+            background: #2563eb; color: white; border: none; padding: 20px 40px;
+            font-size: 20px; font-weight: bold; border-radius: 30px; cursor: pointer;
             box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+            margin-top: 20px;
+            z-index: 1001;
         }
         #btn-calibrate {
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
             z-index: 999; background: rgba(255, 255, 255, 0.2); border: 1px solid rgba(255, 255, 255, 0.4);
-            color: white; padding: 10px 20px; border-radius: 20px; cursor: pointer; display: none;
-            backdrop-filter: blur(5px); font-size: 12px;
+            color: white; padding: 12px 24px; border-radius: 20px; cursor: pointer; display: none;
+            backdrop-filter: blur(5px); font-size: 14px;
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -38,7 +40,7 @@
 
     <div id="vr-overlay">
         <h2>KOGNİTİF VR SAYI OYUNU</h2>
-        <p>Sırasıyla sayıları bulma egzersizi.<br>Lütfen telefonu yatay konuma getirin ve Başlat'a basın.</p>
+        <p>Lütfen telefonunuzu yatay konuma getirin.</p>
         <button class="vr-start-btn" id="btn-start">OYUNU BAŞLAT</button>
     </div>
 
@@ -49,7 +51,6 @@
         let scene, camera, renderer, effect;
         let container = document.getElementById('canvas-container');
         
-        // --- SENİN DEĞİŞMEYECEK ÇEKİRDEK QUATERNION & SLERP MİMARİN ---
         let rawSensorQuaternion = new THREE.Quaternion();
         let calibratedTarget = new THREE.Quaternion();   
         let currentQuaternion = new THREE.Quaternion();  
@@ -59,21 +60,20 @@
         const zee = new THREE.Vector3(0, 0, 1);
         const worldTransform = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
 
-        // --- YENİ EKLENEN DEĞİŞKENLER (BAKIŞ VE OYUN MANTIĞI) ---
         let raycaster = new THREE.Raycaster();
-        let centerPointer = new THREE.Vector2(0, 0); // Ekranın tam ortası
-        let reticleMesh; // Dinamik dolan bakış imleci
+        let centerPointer = new THREE.Vector2(0, 0); 
+        let reticleMesh; 
         
-        let targetNumbers = []; // Sahnedeki sayı objeleri dizisi
-        let currentTargetNumber = 1; // Hastanın bulması gereken mevcut sayı
-        let gazeTimer = 0; // Sayıya ne kadar süredir bakılıyor?
-        const GAZE_TIME_REQUIRED = 1.5; // Seçim için bakılması gereken süre (saniye)
-        let intersectedObject = null; // Şu an bakılan obje
-        let clock = new THREE.Clock(); // Zaman takibi için
+        let targetNumbers = []; 
+        let currentTargetNumber = 1; 
+        let gazeTimer = 0; 
+        const GAZE_TIME_REQUIRED = 1.5; 
+        let intersectedObject = null; 
+        let clock = new THREE.Clock(); 
 
-        // UI için yazı panelleri (Kameranın önüne asılacak talimatlar)
         let uiTextTexture, uiTextMesh;
 
+        // Jiroskop Veri Dinleyicisi
         function onDeviceOrientation(event) {
             if (event.alpha === null) return;
             const alpha = THREE.MathUtils.degToRad(event.alpha);
@@ -82,20 +82,45 @@
             rawSensorQuaternion.setFromEuler(new THREE.Euler(beta, alpha, -gamma, 'YXZ'));
         }
 
-        async function requestSensorsPermission() {
+        // --- TARAYICI UYUMLU BAĞLANTI BAŞLATICI ---
+        document.getElementById('btn-start').addEventListener('click', function() {
+            // İzin isteme mekanizması (iOS ve modern Android korumaları için)
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                try {
-                    const permissionState = await DeviceOrientationEvent.requestPermission();
-                    if (permissionState === 'granted') {
-                        window.addEventListener('deviceorientation', onDeviceOrientation, false);
-                        return true;
-                    }
-                    return false;
-                } catch (e) { return false; }
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            setupGame();
+                        } else {
+                            alert("Jiroskop izni verilmedi. Ayarlardan tarayıcı izinlerini kontrol edin.");
+                        }
+                    })
+                    .catch(err => {
+                        alert("Sensör hatası: " + err.message);
+                    });
             } else {
-                window.addEventListener('deviceorientation', onDeviceOrientation, false);
-                return true;
+                // Standart Android veya PC tarayıcı testleri için doğrudan geçiş
+                setupGame();
             }
+        });
+
+        function setupGame() {
+            // Sensör dinlemeyi başlat
+            window.addEventListener('deviceorientation', onDeviceOrientation, false);
+
+            // Tam ekrana geçiş (Kullanıcı etkileşimi içinde olmalı)
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch(e => console.log("Fullscreen engellendi"));
+            } else if (document.documentElement.webkitRequestFullscreen) {
+                document.documentElement.webkitRequestFullscreen();
+            }
+
+            // UI Değişimleri
+            document.getElementById('vr-overlay').style.display = 'none';
+            document.getElementById('btn-calibrate').style.style.display = 'block';
+
+            // Oyunu kur ve döngüyü tetikle
+            init();
+            animate();
         }
 
         function init() {
@@ -119,29 +144,22 @@
             effect.setEyeSeparation(0.064); 
             effect.setSize(window.innerWidth, window.innerHeight);
 
-            // Çevre Aydınlatması
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
             scene.add(ambientLight);
 
-            // --- GAZE-POINTER (BAKIŞ İMLECİ) KURULUMU ---
-            // İleride dolma efekti yapabilmek için RingGeometry yerine dairesel bir hat oluşturuyoruz
+            // Gaze imleci
             const reticleGeo = new THREE.RingGeometry(0.015, 0.025, 32);
             const reticleMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, depthTest: false });
             reticleMesh = new THREE.Mesh(reticleGeo, reticleMat);
-            reticleMesh.position.set(0, 0, -1.5); // Kameranın 1.5 metre önü
+            reticleMesh.position.set(0, 0, -1.5); 
             camera.add(reticleMesh);
 
-            // --- KAMERA ÖNÜ TALİMAT PANELİ (UI) ---
-            // Hastaya hangi sayıyı bulacağını çift ekranda da düzgün göstermek için kameraya sabitliyoruz
             createUIOverlay();
-
-            // --- OYUN DÜNYASI VE SAYILARIN OLUŞTURULMASI ---
             createNumberTargets();
 
             window.addEventListener('resize', onWindowResize, false);
         }
 
-        // Kognitif hastalar için Canvas tabanlı optimize 2D-in-3D Yazı Kartı
         function createUIOverlay() {
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 128;
@@ -152,27 +170,25 @@
             const geometry = new THREE.PlaneGeometry(0.6, 0.15);
             const material = new THREE.MeshBasicMaterial({ map: uiTextTexture, transparent: true, depthTest: false });
             uiTextMesh = new THREE.Mesh(geometry, material);
-            uiTextMesh.position.set(0, 0.25, -1.5); // İmlecin biraz üstünde duracak
+            uiTextMesh.position.set(0, 0.25, -1.5); 
             camera.add(uiTextMesh);
         }
 
         function updateUIText(text) {
             const ctx = uiTextTexture.image.getContext('2d');
             ctx.clearRect(0, 0, 512, 128);
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.7)';
-            ctx.roundRect ? ctx.roundRect(0, 0, 512, 128, 20) : ctx.fillRect(0, 0, 512, 128);
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+            if(ctx.roundRect) ctx.roundRect(0, 0, 512, 128, 20); else ctx.fillRect(0, 0, 512, 128);
             ctx.fill();
-            ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 6; ctx.stroke();
-            ctx.fillStyle = '#ffffff'; ctx.font = 'bold 40px sans-serif';
+            ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 4; ctx.stroke();
+            ctx.fillStyle = '#ffffff'; ctx.font = 'bold 36px sans-serif';
             ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             ctx.fillText(text, 256, 64);
             uiTextTexture.needsUpdate = true;
         }
 
-        // Hastanın etrafına küre şeklinde 3D Sayı Kartları yerleştirme
         function createNumberTargets() {
             const numbers = [1, 2, 3, 4];
-            // Karmaşayı önlemek için hastanın ön yarım küresine odaklanmış sabit pürüzsüz açılar
             const angles = [-0.6, -0.2, 0.2, 0.6]; 
 
             numbers.forEach((num, index) => {
@@ -180,7 +196,6 @@
                 canvas.width = 256; canvas.height = 256;
                 const ctx = canvas.getContext('2d');
                 
-                // Konforlu kognitif algı için yüksek kontrastlı yuvarlak kart tasarımı
                 ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.arc(128, 128, 110, 0, Math.PI*2); ctx.fill();
                 ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 8; ctx.stroke();
                 ctx.fillStyle = '#ffffff'; ctx.font = 'bold 110px sans-serif';
@@ -192,30 +207,107 @@
                 const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
                 const mesh = new THREE.Mesh(geometry, material);
 
-                // Sayıları hastanın etrafındaki sanal çembere diziyoruz (Yarıçap: 4 metre)
                 const radius = 4;
                 const angle = angles[index];
                 mesh.position.x = Math.sin(angle) * radius;
-                mesh.position.y = 1.6 + (Math.random() * 0.4 - 0.2); // Hafif yükseklik varyasyonu
+                mesh.position.y = 1.6;
                 mesh.position.z = -Math.cos(angle) * radius;
 
-                mesh.userData = { number: num }; // Sayı değerini nesneye bağlıyoruz
+                mesh.userData = { number: num }; 
                 scene.add(mesh);
                 targetNumbers.push(mesh);
             });
         }
 
-        // --- SÜREKLİ ETKİLEŞİM VE BAKIŞ KONTROLÜ (RAYCASTING) ---
         function checkGaze(deltaTime) {
-            // Kameranın merkezinden ileriye ışın fırlatıyoruz
             raycaster.setFromCamera(centerPointer, camera);
             const intersects = raycaster.intersectObjects(targetNumbers);
 
             if (intersects.length > 0) {
                 const hitObject = intersects[0].object;
 
-                // Eğer yeni bir nesneye bakmaya başladıysak zamanı sıfırla
                 if (intersectedObject !== hitObject) {
                     intersectedObject = hitObject;
                     gazeTimer = 0;
-                    reticleMesh.material
+                    reticleMesh.material.color.setHex(0xeab308); 
+                }
+
+                gazeTimer += deltaTime;
+                let scaleProgress = 1 + (gazeTimer / GAZE_TIME_REQUIRED) * 0.5;
+                reticleMesh.scale.set(scaleProgress, scaleProgress, 1);
+
+                if (gazeTimer >= GAZE_TIME_REQUIRED) {
+                    handleNumberSelection(intersectedObject);
+                    gazeTimer = 0; 
+                }
+            } else {
+                if (intersectedObject !== null) {
+                    reticleMesh.scale.set(1, 1, 1);
+                    reticleMesh.material.color.setHex(0xffffff); 
+                    intersectedObject = null;
+                }
+                gazeTimer = 0;
+            }
+        }
+
+        function handleNumberSelection(obj) {
+            const selectedNumber = obj.userData.number;
+            if (selectedNumber === currentTargetNumber) {
+                reticleMesh.material.color.setHex(0x22c55e); 
+                obj.position.y += 20; // Doğru bilinen sayıyı yukarı fırlatıp gizle
+                currentTargetNumber++;
+
+                if (currentTargetNumber > 4) {
+                    updateUIText("TEBRİKLER! BİTTİ");
+                    setTimeout(() => { resetGame(); }, 3000);
+                } else {
+                    updateUIText("HEDEF SAYI: " + currentTargetNumber);
+                }
+            } else {
+                reticleMesh.material.color.setHex(0xef4444); 
+            }
+        }
+
+        function resetGame() {
+            currentTargetNumber = 1;
+            updateUIText("HEDEF SAYI: 1");
+            targetNumbers.forEach((mesh, index) => {
+                mesh.position.y = 1.6;
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const deltaTime = clock.getDelta();
+
+            const orient = window.orientation ? THREE.MathUtils.degToRad(window.orientation) : 0;
+            
+            calibratedTarget.copy(rawSensorQuaternion);
+            calibratedTarget.multiply(worldTransform);
+            calibratedTarget.multiply(new THREE.Quaternion().setFromAxisAngle(zee, -orient));
+            calibratedTarget.premultiply(sensorBiasQuaternion);
+
+            currentQuaternion.slerp(calibratedTarget, SMOOTH_FACTOR);
+            camera.quaternion.copy(currentQuaternion);
+
+            targetNumbers.forEach(mesh => {
+                mesh.lookAt(camera.position.x, mesh.position.y, camera.position.z);
+            });
+
+            checkGaze(deltaTime);
+            effect.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            effect.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        document.getElementById('btn-calibrate').addEventListener('touchend', (e) => {
+            e.preventDefault();
+            sensorBiasQuaternion.copy(currentQuaternion).invert();
+        });
+    </script>
+</body>
+</html>
