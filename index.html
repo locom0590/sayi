@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Kognitif VR Sayı Oyunu - Gelişmiş Seviye Sistemi</title>
+    <title>Kognitif VR Sayı Oyunu - Gelişmiş Geri Bildirim</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body, html {
@@ -64,18 +64,48 @@
         let centerPointer = new THREE.Vector2(0, 0); 
         let reticleMesh; 
         
-        // --- SEVİYE VE DÖNGÜ DEĞİŞKENLERİ ---
         let targetNumbers = []; 
         let currentTargetNumber = 1; 
-        let maxNumberInLevel = 4; // Başlangıçta 4 sayı (1,2,3,4)
-        let isMovementMode = false; // İlk turda hareket kapalı
+        let maxNumberInLevel = 4; 
+        let isMovementMode = false; 
         
         let gazeTimer = 0; 
-        const GAZE_TIME_REQUIRED = 1.0; // İstediğin gibi 1 saniyeye düşürüldü
+        const GAZE_TIME_REQUIRED = 1.5; // İstediğin gibi 1.5 saniyeye güncellendi
         let intersectedObject = null; 
         let clock = new THREE.Clock(); 
 
         let uiTextTexture, uiTextMesh;
+        let audioCtx = null; // Web Audio API Context
+
+        // Web Audio API ile yapay ses sinyalleri üreticisi
+        function playSound(type) {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            
+            let osc = audioCtx.createOscillator();
+            let gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            if (type === 'success') {
+                // Güzel başarı sesi (Pozitif kayan iki frekans)
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(440, audioCtx.currentTime); // A4 notası
+                osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15); // A5 notası
+                gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.3);
+            } else if (type === 'error') {
+                // Kötü hata sesi (Testere dişi kalın frekans)
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(120, audioCtx.currentTime); 
+                osc.frequency.linearRampToValueAtTime(80, audioCtx.currentTime + 0.4); 
+                gainNode.gain.setValueAtTime(0.4, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.4);
+            }
+        }
 
         function onDeviceOrientation(event) {
             if (event.alpha === null) return;
@@ -169,16 +199,22 @@
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
             scene.add(ambientLight);
 
-            // --- GÜNCELLEME: DAHA BÜYÜK İMLEÇ (RETICLE) ---
-            // Yarıçap değerlerini büyüterek (0.015->0.025 ve 0.025->0.045) hastanın odağı kaçırmamasını sağladık.
-            const reticleGeo = new THREE.RingGeometry(0.025, 0.045, 32);
-            const reticleMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, depthTest: false });
+            // --- GÜNCELLEME: İMLEÇ 2 KAT BÜYÜTÜLDÜ VE DERİNLİK AYARI YAPILDI ---
+            // Render sıralamasında en öne almak ve nesnelerin arkasında kalıp kaybolmasını önlemek için renderOrder eklendi.
+            const reticleGeo = new THREE.RingGeometry(0.05, 0.09, 32); 
+            const reticleMat = new THREE.MeshBasicMaterial({ 
+                color: 0xffffff, 
+                side: THREE.DoubleSide, 
+                depthTest: false,
+                depthWrite: false
+            });
             reticleMesh = new THREE.Mesh(reticleGeo, reticleMat);
-            reticleMesh.position.set(0, 0, -1.5); 
+            reticleMesh.position.set(0, 0, -1.4); // Sayılardan (4m) daha önde durarak görünür kalır
+            reticleMesh.renderOrder = 9999; 
             camera.add(reticleMesh);
 
             createUIOverlay();
-            generateDynamicTargets(); // İlk tura ait sayıları üret
+            generateDynamicTargets(); 
 
             window.addEventListener('resize', onWindowResize, false);
         }
@@ -191,9 +227,10 @@
             updateUIStatus();
 
             const geometry = new THREE.PlaneGeometry(0.6, 0.15);
-            const material = new THREE.MeshBasicMaterial({ map: uiTextTexture, transparent: true, depthTest: false });
+            const material = new THREE.MeshBasicMaterial({ map: uiTextTexture, transparent: true, depthTest: false, depthWrite: false });
             uiTextMesh = new THREE.Mesh(geometry, material);
-            uiTextMesh.position.set(0, 0.25, -1.5); 
+            uiTextMesh.position.set(0, 0.35, -1.4); 
+            uiTextMesh.renderOrder = 10000;
             camera.add(uiTextMesh);
         }
 
@@ -215,12 +252,14 @@
             uiTextTexture.needsUpdate = true;
         }
 
-        // --- GÜNCELLEME: RASTGELE KONUMLANDIRMA VE DİNAMİK SAYI ÜRETİMİ ---
+        // --- GÜNCELLEME: DAİRELER 2 KAT BÜYÜTÜLDÜ VE ÜST ÜSTE BİNME ENGELLEYİCİ EKLENDİ ---
         function generateDynamicTargets() {
-            // Eski tura ait objeleri sahneden temizle
             targetNumbers.forEach(mesh => scene.remove(mesh));
             targetNumbers = [];
             currentTargetNumber = 1;
+
+            const radius = 4;
+            const minDistanceBetweenObjects = 1.6; // İki katı büyüklük için aralarında en az 1 daire boşluk bırakan güvenli mesafe
 
             for (let num = 1; num <= maxNumberInLevel; num++) {
                 const canvas = document.createElement('canvas');
@@ -228,32 +267,52 @@
                 const ctx = canvas.getContext('2d');
                 
                 ctx.fillStyle = '#1e293b'; ctx.beginPath(); ctx.arc(128, 128, 110, 0, Math.PI*2); ctx.fill();
-                ctx.strokeStyle = isMovementMode ? '#eab308' : '#3b82f6'; ctx.lineWidth = 8; ctx.stroke(); // Mod rengi
+                ctx.strokeStyle = isMovementMode ? '#eab308' : '#3b82f6'; ctx.lineWidth = 8; ctx.stroke();
                 ctx.fillStyle = '#ffffff'; ctx.font = 'bold 110px sans-serif';
                 ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
                 ctx.fillText(num.toString(), 128, 128);
 
                 const texture = new THREE.CanvasTexture(canvas);
-                const geometry = new THREE.PlaneGeometry(0.7, 0.7);
+                // Plane büyüklüğü 2 katına çıkarıldı (0.7 -> 1.4)
+                const geometry = new THREE.PlaneGeometry(1.4, 1.4); 
                 const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
                 const mesh = new THREE.Mesh(geometry, material);
 
-                // Görüş alanı içinde (-30 derece ile +30 derece arası yatay, hafif dikey sapma) rastgele dizilim
-                const radius = 4;
-                const angleX = (Math.random() * 1.0 - 0.5); // Yatay kavis dağılımı
-                const randomY = 1.0 + (Math.random() * 1.2); // Dikey yükseklik dağılımı (Göz hizası çevreleri)
+                // Üst üste binişleri engellemek için konum doğrulama döngüsü
+                let validPosition = false;
+                let posX, posY, posZ;
+                let attempts = 0;
 
-                mesh.position.x = Math.sin(angleX) * radius;
-                mesh.position.y = randomY;
-                mesh.position.z = -Math.cos(angleX) * radius;
+                while (!validPosition && attempts < 100) {
+                    attempts++;
+                    const angleX = (Math.random() * 0.9 - 0.45); // Yatay kavis alanı sınırlandı
+                    const randomY = 0.8 + (Math.random() * 1.4); 
 
-                // Hareket modu için her objeye özel benzersiz hız ve faz ekliyoruz
+                    posX = Math.sin(angleX) * radius;
+                    posY = randomY;
+                    posZ = -Math.cos(angleX) * radius;
+
+                    validPosition = true;
+                    // Mevcut üretilen diğer sayılarla mesafesini ölç
+                    for (let j = 0; j < targetNumbers.length; j++) {
+                        let other = targetNumbers[j];
+                        let dist = Math.sqrt(Math.pow(posX - other.position.x, 2) + Math.pow(posY - other.position.y, 2) + Math.pow(posZ - other.position.z, 2));
+                        if (dist < minDistanceBetweenObjects) {
+                            validPosition = false;
+                            break;
+                        }
+                    }
+                }
+
+                mesh.position.set(posX, posY, posZ);
+
                 mesh.userData = { 
                     number: num,
                     seedX: Math.random() * 10,
                     seedY: Math.random() * 10,
                     baseX: mesh.position.x,
-                    baseY: mesh.position.y
+                    baseY: mesh.position.y,
+                    isCorrect: false // Dinamik imleç renk kontrolü için
                 }; 
 
                 scene.add(mesh);
@@ -262,6 +321,40 @@
             updateUIStatus();
         }
 
+        // Objeyi rastgele başka bir yere ışınlama fonksiyonu (Yanlış seçim cezası için)
+        function relocateTarget(mesh) {
+            const radius = 4;
+            const minDistanceBetweenObjects = 1.6;
+            let validPosition = false;
+            let posX, posY, posZ;
+            let attempts = 0;
+
+            while (!validPosition && attempts < 100) {
+                attempts++;
+                const angleX = (Math.random() * 0.9 - 0.45);
+                const randomY = 0.8 + (Math.random() * 1.4);
+
+                posX = Math.sin(angleX) * radius;
+                posY = randomY;
+                posZ = -Math.cos(angleX) * radius;
+
+                validPosition = true;
+                for (let j = 0; j < targetNumbers.length; j++) {
+                    let other = targetNumbers[j];
+                    if (other === mesh || other.position.y > 15) continue; // Kendisi ve elenmişlerle kıyaslama
+                    let dist = Math.sqrt(Math.pow(posX - other.position.x, 2) + Math.pow(posY - other.position.y, 2) + Math.pow(posZ - other.position.z, 2));
+                    if (dist < minDistanceBetweenObjects) {
+                        validPosition = false;
+                        break;
+                    }
+                }
+            }
+            mesh.position.set(posX, posY, posZ);
+            mesh.userData.baseX = posX;
+            mesh.userData.baseY = posY;
+        }
+
+        // --- GÜNCELLEME: İMLEÇ RENK KONTROLLERİ ---
         function checkGaze(deltaTime) {
             raycaster.setFromCamera(centerPointer, camera);
             const intersects = raycaster.intersectObjects(targetNumbers);
@@ -272,11 +365,17 @@
                 if (intersectedObject !== hitObject) {
                     intersectedObject = hitObject;
                     gazeTimer = 0;
-                    reticleMesh.material.color.setHex(0xeab308); 
+                }
+
+                // İmleç doğru sayıdaysa YEŞİL, yanlış sayıdaysa KIRMIZI olur
+                if (hitObject.userData.number === currentTargetNumber) {
+                    reticleMesh.material.color.setHex(0x22c55e); // Canlı Yeşil
+                } else {
+                    reticleMesh.material.color.setHex(0xef4444); // Canlı Kırmızı
                 }
 
                 gazeTimer += deltaTime;
-                let scaleProgress = 1 + (gazeTimer / GAZE_TIME_REQUIRED) * 0.4;
+                let scaleProgress = 1 + (gazeTimer / GAZE_TIME_REQUIRED) * 0.3;
                 reticleMesh.scale.set(scaleProgress, scaleProgress, 1);
 
                 if (gazeTimer >= GAZE_TIME_REQUIRED) {
@@ -286,43 +385,68 @@
             } else {
                 if (intersectedObject !== null) {
                     reticleMesh.scale.set(1, 1, 1);
-                    reticleMesh.material.color.setHex(0xffffff); 
+                    reticleMesh.material.color.setHex(0xffffff); // Boşlukta beyaz kalır
                     intersectedObject = null;
                 }
                 gazeTimer = 0;
             }
         }
 
+        // --- GÜNCELLEME: DOĞRU/YANLIŞ GERİ BİLDİRİMLERİ, TİK VE X İŞARETLERİ ---
         function handleNumberSelection(obj) {
             const selectedNumber = obj.userData.number;
+            
             if (selectedNumber === currentTargetNumber) {
-                reticleMesh.material.color.setHex(0x22c55e); 
-                obj.position.y += 20; // Seçileni yukarı uçur
+                // DOĞRU SEÇİM: Yeşil tik çiz, ses ver, objeyi uçur
+                playSound('success');
+                showFeedbackOnObject(obj, '✓', '#22c55e');
+
+                obj.position.y += 20; // Gizle
                 currentTargetNumber++;
 
                 if (currentTargetNumber > maxNumberInLevel) {
-                    // Seviye tamamlandığında tetiklenecek kural döngüsü
                     progressToNextLevel();
                 } else {
                     updateUIStatus();
                 }
             } else {
-                reticleMesh.material.color.setHex(0xef4444); 
+                // YANLIŞ SEÇİM: Kırmızı X çiz, ses ver, objeyi başka yere ışınla
+                playSound('error');
+                showFeedbackOnObject(obj, '✕', '#ef4444');
+                relocateTarget(obj);
             }
         }
 
-        // --- GÜNCELLEME: KADEMELİ ZORLUK SEVİYE SİSTEMİ ---
+        // Sayı dairelerinin üzerinde anlık sembol belirten fonksiyon
+        function showFeedbackOnObject(obj, symbol, colorStr) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128; canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = colorStr; ctx.font = 'bold 90px sans-serif';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(symbol, 64, 64);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const geometry = new THREE.PlaneGeometry(1.0, 1.0);
+            const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, depthTest: false });
+            const feedbackMesh = new THREE.Mesh(geometry, material);
+            
+            feedbackMesh.position.copy(obj.position);
+            feedbackMesh.position.z += 0.1; // Hafifçe önünde dursun
+            scene.add(feedbackMesh);
+
+            // 0.8 saniye sonra işareti sahneden tamamen sil
+            setTimeout(() => { scene.remove(feedbackMesh); }, 800);
+        }
+
         function progressToNextLevel() {
             updateUIText("TEBRİKLER! YENİ TUR");
-            
             setTimeout(() => {
                 if (maxNumberInLevel < 10) {
-                    // Sayıyı 1 arttırarak bir sonraki tura geç (Örn: 4 -> 5 -> 6...)
                     maxNumberInLevel++;
                 } else {
-                    // 10 başarıyla bittiğinde başa dön ama bu sefer HAREKET MODUNU aç/kapat
                     maxNumberInLevel = 4;
-                    isMovementMode = !isMovementMode; // false ise true yapar, true ise false
+                    isMovementMode = !isMovementMode; 
                 }
                 generateDynamicTargets();
             }, 1500);
@@ -344,11 +468,10 @@
             camera.quaternion.copy(currentQuaternion);
 
             targetNumbers.forEach(mesh => {
-                // --- GÜNCELLEME: YUMUŞAK HAREKET MODU ---
-                if (isMovementMode && mesh.position.y < 10) { // Seçilip yukarı uçmamışsa hareket etsin
-                    // Matematiksel sinisüdal dalgalanma ile yumuşak yüzen objeler yaratıyoruz
-                    mesh.position.x = mesh.userData.baseX + Math.sin(time + mesh.userData.seedX) * 0.25;
-                    mesh.position.y = mesh.userData.baseY + Math.cos(time * 0.8 + mesh.userData.seedY) * 0.20;
+                // --- GÜNCELLEME: HAREKET HIZI %30 ARTTIRILDI (Hız çarpanı 1.0 -> 1.3 yapıldı) ---
+                if (isMovementMode && mesh.position.y < 15) { 
+                    mesh.position.x = mesh.userData.baseX + Math.sin(time * 1.3 + mesh.userData.seedX) * 0.35;
+                    mesh.position.y = mesh.userData.baseY + Math.cos(time * 1.04 + mesh.userData.seedY) * 0.28;
                 }
                 mesh.lookAt(camera.position.x, mesh.position.y, camera.position.z);
             });
